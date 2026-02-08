@@ -9,6 +9,13 @@ import { Verdict, AnalysisResult, Language } from './types';
 import { analyzeMessage } from './services/geminiService';
 import { validateImageData } from './utils/security';
 
+const LOCALE_MAP: Record<Language, string> = {
+  en: 'en-US',
+  es: 'es-ES',
+  fr: 'fr-FR',
+  ar: 'ar-SA'
+};
+
 const translations = {
   en: {
     guardian: "Safe Digital Guardian",
@@ -209,8 +216,7 @@ const App: React.FC = () => {
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
-      const voiceLangs: Record<Language, string> = { en: 'en-US', es: 'es-ES', fr: 'fr-FR', ar: 'ar-SA' };
-      utterance.lang = voiceLangs[lang];
+      utterance.lang = LOCALE_MAP[lang];
       utterance.rate = 0.9;
       window.speechSynthesis.speak(utterance);
     }
@@ -224,8 +230,8 @@ const App: React.FC = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
     
-    const voiceLangs: Record<Language, string> = { en: 'en-US', es: 'es-ES', fr: 'fr-FR', ar: 'ar-SA' };
-    recognition.lang = voiceLangs[lang];
+    // Dynamically set the recognition language based on current state
+    recognition.lang = LOCALE_MAP[lang];
     recognition.continuous = true;
     recognition.interimResults = true;
 
@@ -350,7 +356,10 @@ const App: React.FC = () => {
             {(['en', 'es', 'fr', 'ar'] as Language[]).map((l) => (
               <button
                 key={l}
-                onClick={() => { setLang(l); if (step === 'voice') stopListening(); }}
+                onClick={() => { 
+                  setLang(l); 
+                  if (step === 'voice') stopListening(); 
+                }}
                 className={`w-8 h-8 rounded-full text-[10px] font-black uppercase transition-all ${lang === l ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
               >
                 {l}
