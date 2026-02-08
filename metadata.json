@@ -1,0 +1,7 @@
+{
+  "name": "SCAMSHIELD PRO",
+  "description": "An advanced cybersecurity assistant powered by Gemini to detect and analyze phishing attempts, scam messages, and suspicious URLs.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
