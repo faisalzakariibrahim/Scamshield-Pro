@@ -5,6 +5,8 @@ export enum Verdict {
   SCAM = 'SCAM'
 }
 
+export type Language = 'en' | 'es' | 'fr' | 'ar';
+
 export interface GroundingSource {
   title: string;
   uri: string;
@@ -18,23 +20,16 @@ export interface AnalysisResult {
   verdict: Verdict;
   riskScore: number;
   indicators: string[];
-  reasoning: string;
-  advice: string;
+  reasoning: string; // Plain language why
+  advice: string;    // Plain language steps
   imageUrl?: string;
   sources?: GroundingSource[];
   isDeepScan?: boolean;
-}
-
-export interface ScanStats {
-  total: number;
-  scams: number;
-  suspicious: number;
-  safe: number;
 }
 
 export interface SystemLog {
   id: string;
   timestamp: number;
   message: string;
-  type: 'info' | 'error' | 'success' | 'database';
+  type: 'info' | 'error' | 'success';
 }

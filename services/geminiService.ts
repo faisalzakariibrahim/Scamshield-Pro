@@ -1,130 +1,92 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { Verdict, AnalysisResult, GroundingSource } from "../types";
-import { sanitizeInput, validateAIResponse } from "../utils/security";
+import { Verdict, AnalysisResult, GroundingSource, Language } from "../types";
 
-const SYSTEM_INSTRUCTION = `
-You are ScamShield Pro, a helpful and friendly digital security assistant. Your job is to help regular people stay safe from scams, phishing, and fake messages.
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-TONE & STYLE:
-- Be clear, reassuring, and non-intimidating.
-- Avoid heavy technical jargon unless explaining a specific red flag.
-- Use simple terms: "Fake Link" instead of "Obfuscated URL", "Urgent Pressure" instead of "Social Engineering".
+const languageNames: Record<Language, string> = {
+  en: 'English',
+  es: 'Spanish',
+  fr: 'French',
+  ar: 'Arabic'
+};
 
-OUTPUT DIRECTIVES:
-1. Verdict: SAFE, SUSPICIOUS, or SCAM.
-2. Risk Score: 0-100 (0 is totally fine, 100 is definitely a scam).
-3. Indicators: 3-5 clear red flags (e.g., "Mismatched sender", "Asking for password", "Too good to be true").
-4. Reasoning: A friendly explanation of why you reached that verdict.
-5. Advice: Clear, simple steps the user should take.
-
-SAFE-BY-DEFAULT POLICY: If a message looks slightly weird or you're unsure, mark it as SUSPICIOUS to keep the user safe.
-
-Your response MUST be in JSON format.
-`;
-
-const getFailSafeResult = (content: string, errorMsg: string): AnalysisResult => ({
-  id: `err-${Math.random().toString(36).substring(7)}`,
-  timestamp: Date.now(),
-  content: content.slice(0, 100) + '...',
-  contentType: 'text',
-  verdict: Verdict.SUSPICIOUS,
-  riskScore: 50,
-  indicators: ['Technical Glitch'],
-  reasoning: `We had a small trouble analyzing this specific message right now. To be safe, we've marked it as suspicious.`,
-  // Fix: Use double quotes or escape the single quote to prevent syntax error on line 33
-  advice: "Don't click any links in this message until you can verify it with a person you trust.",
-});
-
+/**
+ * ScamShield Pro - Human-Centric Analysis Engine
+ * 
+ * Philosophy:
+ * - Age-Inclusive: Friendly for 8 to 80 year olds.
+ * - Calm: No technical jargon or scary warnings.
+ * - Multi-Language: Localized reasoning and advice.
+ * - Robust: Handles typos and transcription errors from voice input.
+ */
 export const analyzeMessage = async (
-  rawContent: string, 
-  isImage: boolean = false, 
-  deepScan: boolean = false
+  content: string, 
+  isImage: boolean = false,
+  language: Language = 'en'
 ): Promise<AnalysisResult> => {
-  // Fix: Do not sanitize if it is an image to avoid truncating base64 data
-  const content = isImage ? rawContent : sanitizeInput(rawContent);
-  if (!content) {
-    throw new Error("Please enter some text or upload an image to check.");
-  }
-
-  // Fix: Direct access to process.env.API_KEY is allowed, but ensure it exists
-  if (!process.env.API_KEY) {
-    return getFailSafeResult(isImage ? 'Image Scan' : content, "Missing connection");
-  }
-
-  // Always create a new instance before making an API call as per guidelines
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const modelName = isImage 
-    ? 'gemini-2.5-flash-image' 
-    : (deepScan ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview');
-
-  const config: any = {
-    systemInstruction: SYSTEM_INSTRUCTION,
-  };
-
-  // Rule: DO NOT set responseMimeType or responseSchema for nano banana series models (e.g., gemini-2.5-flash-image)
-  if (!isImage) {
-    config.responseMimeType = "application/json";
-    config.responseSchema = {
-      type: Type.OBJECT,
-      properties: {
-        verdict: { type: Type.STRING },
-        riskScore: { type: Type.NUMBER },
-        indicators: { type: Type.ARRAY, items: { type: Type.STRING } },
-        reasoning: { type: Type.STRING },
-        advice: { type: Type.STRING },
-      },
-      required: ['verdict', 'riskScore', 'indicators', 'reasoning', 'advice'],
-    };
-  }
-
-  if (deepScan && !isImage) {
-    config.tools = [{ googleSearch: {} }];
-  }
-
   try {
-    let response;
+    const model = 'gemini-3-pro-preview';
+    const targetLang = languageNames[language];
+    
+    const parts: any[] = [];
     if (isImage) {
-      const base64Data = content.split(',')[1] || content;
-      response = await ai.models.generateContent({
-        model: modelName,
-        contents: {
-          parts: [
-            { inlineData: { mimeType: 'image/jpeg', data: base64Data } },
-            { text: "Please help me check if this screenshot shows a scam or a dangerous message. Respond only with JSON containing: verdict, riskScore, indicators, reasoning, advice." }
-          ]
-        },
-        config
-      });
+      const [header, data] = content.split(',');
+      const mimeType = header.match(/:(.*?);/)?.[1] || 'image/jpeg';
+      parts.push({ inlineData: { mimeType, data } });
+      parts.push({ text: `Is this image or the text inside it a scam? Explain in very simple, kind words for a child or an elderly person. IMPORTANT: Your entire response must be in ${targetLang}.` });
     } else {
-      response = await ai.models.generateContent({
-        model: modelName,
-        contents: content,
-        config
-      });
+      parts.push({ text: `Analyze this message. Determine if it's a trick to get money or secrets. \n\nMESSAGE: ${content}\n\nIMPORTANT: Your entire response (verdict, reasoning, advice, indicators) must be in ${targetLang}.` });
     }
 
-    const rawText = response.text || '{}';
-    let parsed;
-    try {
-      // Clean potential markdown if the model wrapped JSON in code blocks (likely for nano banana models)
-      const cleanJson = rawText.replace(/```json\n?|```/g, '').trim();
-      parsed = JSON.parse(cleanJson);
-    } catch (e) {
-      console.error("AI response parsing error:", rawText);
-      return getFailSafeResult(isImage ? 'Image Scan' : content, "Response error");
-    }
+    const response = await ai.models.generateContent({
+      model,
+      contents: { parts },
+      config: {
+        systemInstruction: `
+        You are ScamShield Pro, a kind and protective digital guardian. 
+        Your goal is to help people of all ages (kids to grandparents) understand if a message is a trick.
 
-    if (!validateAIResponse(parsed)) {
-      return getFailSafeResult(isImage ? 'Image Scan' : content, "Validation error");
-    }
+        RESPONSE STYLE:
+        1. LANGUAGE: Use simple, Grade 5 level words. NO jargon.
+        2. TARGET LANGUAGE: You MUST respond in ${targetLang}.
+        3. TONE: Calm, reassuring, and never blaming. If a scam is found, say "Scammers are very clever, you did the right thing by checking."
+        4. PANIC DETECTION: If the message sounds scary or rushed, explicitly tell the user to take a deep breath and that scammers use "hurry" to stop us from thinking.
+        5. ROBUSTNESS: This input might be from a voice transcription. Ignore minor spelling mistakes or words that sound like others if the context implies a scam (e.g., "bank" vs "bang").
+        
+        JSON STRUCTURE (keys must remain as defined, but values must be in ${targetLang}):
+        {
+          "verdict": "SAFE" | "SUSPICIOUS" | "SCAM",
+          "risk_score": 0-100,
+          "indicators": ["short reason in ${targetLang}"],
+          "reasoning": "Simple explanation in ${targetLang}.",
+          "advice": "Simple next steps in ${targetLang}."
+        }
+        `,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            verdict: { type: Type.STRING },
+            risk_score: { type: Type.NUMBER },
+            indicators: { type: Type.ARRAY, items: { type: Type.STRING } },
+            reasoning: { type: Type.STRING },
+            advice: { type: Type.STRING },
+          },
+          required: ["verdict", "risk_score", "indicators", "reasoning", "advice"],
+        },
+        tools: [{ googleSearch: {} }],
+      },
+    });
 
+    const result = JSON.parse(response.text || '{}');
+    
     const sources: GroundingSource[] = [];
-    const groundingMetadata = response.candidates?.[0]?.groundingMetadata;
-    if (groundingMetadata?.groundingChunks) {
-      groundingMetadata.groundingChunks.forEach((chunk: any) => {
-        if (chunk.web?.uri && chunk.web?.title) {
-          sources.push({ title: chunk.web.title, uri: chunk.web.uri });
+    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+    if (chunks) {
+      chunks.forEach((chunk: any) => {
+        if (chunk.web) {
+          sources.push({ title: chunk.web.title || 'Official Source', uri: chunk.web.uri });
         }
       });
     }
@@ -132,18 +94,28 @@ export const analyzeMessage = async (
     return {
       id: Math.random().toString(36).substring(7),
       timestamp: Date.now(),
-      content: isImage ? 'Image Scan' : content,
+      content: isImage ? 'Picture' : content,
       contentType: isImage ? 'image' : 'text',
-      verdict: parsed.verdict as Verdict,
-      riskScore: parsed.riskScore,
-      indicators: parsed.indicators,
-      reasoning: parsed.reasoning,
-      advice: parsed.advice,
+      verdict: (result.verdict || 'SUSPICIOUS').toUpperCase() as Verdict,
+      riskScore: result.risk_score || 50,
+      indicators: result.indicators || [],
+      reasoning: result.reasoning || "Analysis complete.",
+      advice: result.advice || "Standard precautions apply.",
       sources: sources.length > 0 ? sources : undefined,
-      isDeepScan: deepScan,
+      isDeepScan: true,
       imageUrl: isImage ? content : undefined,
     };
   } catch (error: any) {
-    return getFailSafeResult(isImage ? 'Image Scan' : content, error?.message || "Internal error");
+    return {
+      id: `err-${Date.now()}`,
+      timestamp: Date.now(),
+      content: 'System Check',
+      contentType: isImage ? 'image' : 'text',
+      verdict: Verdict.SUSPICIOUS,
+      riskScore: 60,
+      indicators: ['Safety Pause'],
+      reasoning: "Analysis interrupted.",
+      advice: "Please treat this as a trick and ask a friend for help.",
+    };
   }
 };
